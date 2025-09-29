@@ -4,6 +4,7 @@ import time
 import subprocess
 import sys
 import os
+import asyncio
 from datetime import datetime
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
@@ -122,58 +123,55 @@ def save_application_data(user_data):
     file_success = save_to_json_file(user_data)
     return "backup_file" if file_success else "error"
 
-def schedule_restart(application):
+async def schedule_restart(application):
     """Планирует перезапуск бота через заданное время"""
-    import threading
+    await asyncio.sleep(RESTART_INTERVAL)
 
-    def restart_job():
-        global restart_count, last_restart_time
+    global restart_count, last_restart_time
 
-        time.sleep(RESTART_INTERVAL)
+    if restart_count >= MAX_RESTART_ATTEMPTS:
+        logging.error("❌ Достигнут лимит перезапусков. Остановка бота.")
+        await send_admin_notification("❌ Бот остановлен: достигнут лимит перезапусков")
+        return
 
-        if restart_count >= MAX_RESTART_ATTEMPTS:
-            logging.error("❌ Достигнут лимит перезапусков. Остановка бота.")
-            send_admin_notification("❌ Бот остановлен: достигнут лимит перезапусков")
-            return
+    logging.info("🔄 Запланированный перезапуск бота...")
+    await send_admin_notification("🔄 Запланированный перезапуск бота")
 
-        logging.info("🔄 Запланированный перезапуск бота...")
-        send_admin_notification("🔄 Запланированный перезапуск бота")
+    restart_count += 1
+    last_restart_time = time.time()
 
-        restart_count += 1
-        last_restart_time = time.time()
+    # Перезапускаем бота
+    await restart_bot(application)
 
-        # Останавливаем бота и перезапускаем
-        application.stop()
-        time.sleep(5)
-        restart_bot()
-
-    thread = threading.Thread(target=restart_job, daemon=True)
-    thread.start()
-
-def send_admin_notification(message):
+async def send_admin_notification(message):
     """Отправляет уведомление администратору"""
     try:
         from telegram import Bot
         bot = Bot(token=BOT_TOKEN)
-        bot.send_message(chat_id=ADMIN_CHAT_ID, text=message)
+        await bot.send_message(chat_id=ADMIN_CHAT_ID, text=message)
     except Exception as e:
         logging.error(f"❌ Ошибка отправки уведомления админу: {e}")
 
-def restart_bot():
+async def restart_bot(application):
     """Перезапускает бота"""
     logging.info("🔄 Перезапуск бота...")
 
+    # Останавливаем текущее приложение
+    await application.stop()
+    await asyncio.sleep(5)
+    
+    # Запускаем новый процесс
     python = sys.executable
     script = os.path.abspath(__file__)
-
+    
     try:
         subprocess.Popen([python, script])
         sys.exit(0)
     except Exception as e:
         logging.error(f"❌ Ошибка при перезапуске: {e}")
         # Если перезапуск не удался, пытаемся запустить обычным способом
-        time.sleep(RESTART_DELAY)
-        main()
+        await asyncio.sleep(RESTART_DELAY)
+        await main()
 
 def setup_application():
     """Настройка и возврат приложения"""
@@ -307,7 +305,7 @@ async def get_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if save_result == "google_sheets":
         storage_info = "✅ Данные сохранены в Google Sheets и локальный файл"
     elif save_result == "backup_file":
-        storage_info = "⚠️ Google Sheets недоступен, данные только в локальном файле"
+        storage_info = "⚠️ Google Sheets недоступен, данные только в локальном файл"
     else:
         storage_info = "❌ Ошибка сохранения данных"
 
@@ -345,10 +343,9 @@ async def manual_restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logging.info("🔄 Ручной перезапуск по команде администратора")
 
     # Даем время на отправку сообщения
-    import asyncio
     await asyncio.sleep(2)
 
-    restart_bot()
+    await restart_bot(context.application)
 
 async def bot_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Статус бота"""
@@ -422,10 +419,10 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # При серьезной ошибке пытаемся перезапуститься
     if isinstance(context.error, Exception):
         logging.warning("🔄 Серьезная ошибка, планируем перезапуск...")
-        time.sleep(RESTART_DELAY)
-        restart_bot()
+        await asyncio.sleep(RESTART_DELAY)
+        await restart_bot(context.application)
 
-def main():
+async def main():
     global restart_count, last_restart_time
 
     logging.info("🚀 Запуск бота с системой перезапуска...")
@@ -440,22 +437,22 @@ def main():
         application = setup_application()
 
         # Планируем автоматический перезапуск
-        schedule_restart(application)
+        asyncio.create_task(schedule_restart(application))
 
         # Уведомляем администратора о запуске
-        send_admin_notification("🤖 Бот запущен и готов к работе!")
+        await send_admin_notification("🤖 Бот запущен и готов к работе!")
 
         logging.info(f"✅ Бот запущен. Следующий перезапуск через {RESTART_INTERVAL/3600} часов")
         logging.info("💾 Данные сохраняются в Google Sheets + локальный файл")
         logging.info("🔄 Система автоматического перезапуска активна")
 
         # Запускаем бота
-        application.run_polling()
+        await application.run_polling()
 
     except Exception as e:
         logging.error(f"❌ Критическая ошибка: {e}")
-        time.sleep(RESTART_DELAY)
-        restart_bot()
+        await asyncio.sleep(RESTART_DELAY)
+        await main()
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())
