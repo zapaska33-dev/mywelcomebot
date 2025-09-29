@@ -1,3 +1,5 @@
+pip install python-telegram-bot --upgrade
+
 import logging
 import json
 import time
@@ -7,8 +9,6 @@ import os
 from datetime import datetime
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
-
-pip install -r requirements.txt
 
 # ================== НАСТРОЙКИ GOOGLE SHEETS ==================
 SPREADSHEET_ID = "1Sk4HHpQl9Z30vytkIFrHxTOty5W6xj9wdPwAeAamWGE"
