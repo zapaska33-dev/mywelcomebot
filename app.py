@@ -1,5 +1,3 @@
-pip install python-telegram-bot --upgrade
-
 import logging
 import json
 import time
